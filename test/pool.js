@@ -616,10 +616,11 @@ async function checkLateFailover() {
 async function checkIdleRebroadcast() {
     for (const cleanJobs of [false, true]) {
         const initial = template(200, 'initial');
-        const live = await start(initial, {
+        const options = {
             blockRefreshInterval: 5000, jobRebroadcastTimeout: 2,
             cleanJobsOnTemplateUpdate: cleanJobs
-        });
+        };
+        const live = await start(initial, options);
         const manager = live.pool.jobManager;
         const first = manager.currentJob;
         const pending = live.pending();
@@ -627,6 +628,8 @@ async function checkIdleRebroadcast() {
         const refreshed = clone(initial);
         refreshed.curtime += 10;
         refreshed.finalsaplingroothash = '99'.repeat(32);
+        refreshed.coinbasetxn.data += '00';
+        refreshed.defaultroots.blockcommitmentshash = '99'.repeat(32);
         live.setTemplate(refreshed);
         await live.advance(2000);
         const current = manager.currentJob;
@@ -635,6 +638,8 @@ async function checkIdleRebroadcast() {
         assert.notStrictEqual(current.jobId, first.jobId, 'fresh time creates different work');
         assert.strictEqual(current.hashReserved, first.hashReserved,
             'ordinary refreshes must not replace long-poll transactions or roots');
+        assert.strictEqual(current.genTx, first.genTx,
+            'ordinary time refreshes must retain the authoritative daemon coinbase');
         assert.strictEqual(live.broadcasts.length, 2, 'fresh work replaces the idle heartbeat');
         assert.strictEqual(live.broadcasts[1][7], cleanJobs);
         assert.strictEqual(current.registerSubmit('nonce', 'solution'), true);
@@ -795,8 +800,44 @@ async function checkSubsidyCancellation() {
         'a canceled subsidy stage cannot roll back the replacement channel');
 }
 
+async function checkDaemonCoinbase() {
+    let rpc = template(200, 'daemon-initial');
+    rpc.coinbasetxn = {data: '0600008098b684d85b16a537', hash: '11'.repeat(32)};
+    rpc.defaultroots = {merkleroot: '22'.repeat(32), blockcommitmentshash: '33'.repeat(32)};
+    const live = await start(rpc, {paymentProcessing: {enabled: true}});
+    const first = live.pool.jobManager.currentJob;
+    assert.strictEqual(first.genTx, rpc.coinbasetxn.data);
+    assert.strictEqual(first.genTxHash, rpc.coinbasetxn.hash);
+    assert.strictEqual(first.merkleRoot,
+        Buffer.from(rpc.defaultroots.merkleroot, 'hex').reverse().toString('hex'));
+    assert.strictEqual(first.hashReserved,
+        Buffer.from(rpc.defaultroots.blockcommitmentshash, 'hex').reverse().toString('hex'));
+    for (const field of ['coinbase', 'merkle', 'commitment', 'headerCommitment']) {
+        rpc = clone(rpc);
+        rpc.longpollid += '-updated';
+        if (field === 'coinbase') rpc.coinbasetxn.data += '00';
+        if (field === 'merkle') rpc.defaultroots.merkleroot = '44'.repeat(32);
+        if (field === 'commitment') rpc.defaultroots.blockcommitmentshash = '55'.repeat(32);
+        if (field === 'headerCommitment') rpc.blockcommitmentshash = '66'.repeat(32);
+        const previous = live.pool.jobManager.currentJob;
+        await live.reply(rpc);
+        assert.notStrictEqual(live.pool.jobManager.currentJob.jobId, previous.jobId);
+        assert.strictEqual(live.pool.jobManager.validJobs[previous.jobId], previous);
+        assert.strictEqual(live.broadcasts[live.broadcasts.length - 1][7], false);
+        const current = live.pool.jobManager.currentJob;
+        assert.strictEqual(current.genTx, rpc.coinbasetxn.data);
+        assert.strictEqual(current.merkleRoot,
+            Buffer.from(rpc.defaultroots.merkleroot, 'hex').reverse().toString('hex'));
+        assert.strictEqual(current.hashReserved,
+            Buffer.from(rpc.blockcommitmentshash || rpc.defaultroots.blockcommitmentshash,
+                'hex').reverse().toString('hex'));
+    }
+    assert.strictEqual(live.pool.jobManager.currentJob.genTx, rpc.coinbasetxn.data);
+}
+
 const regressionChecks = {
     idle: checkIdleRebroadcast,
+    daemonCoinbase: checkDaemonCoinbase,
     subsidy: checkLegacySubsidy,
     subsidyFailure: checkSubsidyFailure,
     subsidyCancellation: checkSubsidyCancellation,
@@ -820,7 +861,8 @@ const checks = process.argv[2] ? regressionChecks[process.argv[2]]() :
         .then(checkOrdinarySingleFlight).then(checkStreamingAndNotify)
         .then(checkLateFailover).then(checkIdleRebroadcast).then(checkRealHeartbeat)
         .then(checkResponsiveDaemonPolling).then(checkAcceptedBlockRefresh)
-        .then(checkLegacySubsidy).then(checkSubsidyFailure).then(checkSubsidyCancellation);
+        .then(checkLegacySubsidy).then(checkSubsidyFailure).then(checkSubsidyCancellation)
+        .then(checkDaemonCoinbase);
 checks.then(() => {
     console.log('Pool long-poll, backstop, retry, failover and clean-job compatibility checks passed.');
 }, error => {

@@ -55,6 +55,7 @@ async function check() {
 
     await update(value => {
         value.transactions.push({hash: '33'.repeat(32), data: '0600008001', fee: 10000});
+        delete value.defaultroots.merkleroot; // Exercise hash fallback when no default root is supplied.
     });
     assert.notStrictEqual(manager.currentJob.merkleRoot, first.merkleRoot);
     assert.strictEqual(manager.currentJob.rewardFees, 10000);
