@@ -97,6 +97,24 @@ var myCoin = {
 };
 ```
 
+#### Current Zcash templates
+
+This fork always uses the daemon's `coinbasetxn.data` and `coinbasetxn.hash`.
+Configure the daemon's mining reward address before starting the pool and keep
+the pool's `address` consistent with it; no coinbase-mode option is needed.
+Pool payout options do not rewrite the daemon's funding outputs or shielded
+bundles. Pool fees must be handled outside the coinbase.
+
+The pool preserves opaque transaction bytes and order, uses the template's
+`defaultroots.merkleroot` when supplied, and puts `blockcommitmentshash`
+(including `defaultroots.blockcommitmentshash`) in the header commitment field,
+falling back to `finalsaplingroothash` for older templates. Hashes from the RPC
+are converted from display order to header byte order. Same-parent coinbase
+and root changes create new jobs while retaining in-flight old jobs.
+
+Run `npm test` with Node.js 8.17 or newer for serialization and RPC-routing
+checks. These do not establish live consensus acceptance.
+
 If you are using an equihash coin that has founder's rewards, you need to include details about the FR system,
 ```javascript
 var myCoin = {
@@ -183,11 +201,18 @@ var pool = Stratum.createPool({
 
     "blockRefreshInterval": 1000, //How often to poll RPC daemons for new blocks, in milliseconds
 
+    // Timer backstop while daemon long polling is healthy (default: 60000 ms).
+    "longPollRefreshInterval": 60000,
+
 
     /* Some miner apps will consider the pool dead/offline if it doesn't receive anything new jobs
        for around a minute, so every time we broadcast jobs, set a timeout to rebroadcast
-       in this many seconds unless we find a new job. Set to zero or remove to disable this. */
+       in this many seconds unless we find a new job. Keep this interval positive. */
     "jobRebroadcastTimeout": 55,
+
+    // Enable for miners that ignore non-clean same-parent updates. Default: false.
+    // Recent jobs still accept shares; this only tells miners to replace current work.
+    "cleanJobsOnTemplateUpdate": false,
 
     //instanceId: 37, //Recommend not using this because a crypto-random one will be generated
 
@@ -293,6 +318,37 @@ var pool = Stratum.createPool({
     });
 });
 ```
+
+#### Template refresh
+
+The pool automatically uses long polling when a template supplies an opaque
+long-poll ID. One dedicated request waits on the issuing daemon, with a one-hour
+timeout. While healthy, the ordinary polling backstop uses the greater of the
+configured block refresh interval and long-poll refresh interval (default:
+60 seconds). Errors restore ordinary polling and retry long polling after one
+second. Daemons without long-poll support keep the ordinary polling interval.
+Setting the block refresh interval to zero disables the timer backstop, not long
+polling.
+
+Each returned template obtains its subsidy at the returned height from the same
+daemon before work is built. This fork always uses Zebra's `coinbasetxn.data`
+and `coinbasetxn.hash`; pool payout options do not rebuild the daemon coinbase.
+Templates and same-parent coinbase updates must retain those fields.
+
+Changed transactions, subsidy or payout inputs, commitments, or difficulty
+produce a new job even when the parent is unchanged. The last 32 same-parent
+jobs remain valid for in-flight shares; a new parent clears them. By default,
+same-parent updates do not clear miners' work. The clean-jobs-on-template-update
+option can request replacement for miners that ignore non-clean jobs without
+invalidating those retained jobs on the server.
+
+Idle rebroadcasts request fresh daemon time without waiting for an RPC response.
+Timestamp-only changes create different work at idle, not at every poll. When
+work is unchanged, heartbeats reuse the current job ID with `clean_jobs=false`,
+preserving duplicate-share tracking even with the clean-job override. Ordinary
+time refreshes cannot replace transactions or roots owned by healthy long polling.
+Keep the job rebroadcast timeout positive so idle connections continue receiving work.
+
 
 
 Listen to pool events
