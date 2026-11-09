@@ -94,6 +94,24 @@ var myCoin = {
 };
 ```
 
+#### Current Zcash templates
+
+This fork always uses the daemon's `coinbasetxn.data` and `coinbasetxn.hash`.
+Configure the daemon's mining reward address before starting the pool and keep
+the pool's `address` consistent with it; no coinbase-mode option is needed.
+Pool payout options do not rewrite the daemon's funding outputs or shielded
+bundles. Pool fees must be handled outside the coinbase.
+
+The pool preserves opaque transaction bytes and order, uses the template's
+`defaultroots.merkleroot` when supplied, and puts `blockcommitmentshash`
+(including `defaultroots.blockcommitmentshash`) in the header commitment field,
+falling back to `finalsaplingroothash` for older templates. Hashes from the RPC
+are converted from display order to header byte order. Same-parent coinbase
+and root changes create new jobs while retaining in-flight old jobs.
+
+Run `npm test` with Node.js 8.17 or newer for serialization and RPC-routing
+checks. These do not establish live consensus acceptance.
+
 If you are using an equihash coin that has founder's rewards, you need to include details about the FR system,
 ```javascript
 var myCoin = {
