@@ -3,8 +3,11 @@ pools, each with their own daemon and stratum port :)
 
 # IMPORTANT
 
-This fork does not pay any pool fees, because `s-nomp/node-stratum-pool` does not support Zcash NU5 transactions.
-Instead, all fees are paid to the address in the node configuration.
+This fork preserves the daemon's coinbase and ordered transaction bytes, including
+NU6.3 v6 transactions. Configure the reward address in Zebra's `[mining]
+miner_address`; the pool's `address` remains a legacy transparent identity.
+Nonempty `rewardRecipients` and `poolHex` are rejected because they cannot change
+the daemon coinbase. External payment processing, including Zallet, is allowed.
 
 #### Notice
 This is a module for Node.js that will do nothing on its own. Unless you're a Node.js developer who would like to
@@ -43,6 +46,7 @@ Features
 * ✓ __Equihash 200,9
 * ✓ __Equihash 144,5
 * ✓ __Equihash 192,7
+* Equihash 48,5 (native Zcash Regtest)
 
 Requirements
 ------------
@@ -52,6 +56,12 @@ Requirements
 The minimum supported `bignum` version is `0.13.1`, which removes the unsafe
 prebuilt-binary download described in [GHSA-7cgc-fjv4-52x6](https://github.com/advisories/GHSA-7cgc-fjv4-52x6).
 
+The native verifier is pinned to `s-nomp/equihashverify` revision
+`2b2c5c9725f1e85a4eaa8b1c8f974aad65362c8e`. Its native code and JavaScript
+interface match the integration's previous verifier; only its build-tool constraint
+differs. `node-gyp` is pinned to `5.0.5` for Node 8-compatible native installation.
+Builds require Python 2.7, a C/C++ compiler, Boost.System and libsodium headers.
+
 
 Example Usage
 -------------
@@ -59,8 +69,9 @@ Example Usage
 #### Install as a node module by cloning repository
 
 ```bash
-git clone https://github.com/s-nomp/node-stratum-pool.git node_modules/stratum-pool
-npm update
+git clone --branch zebra-mining https://github.com/ZcashFoundation/node-stratum-pool.git
+cd node-stratum-pool
+npm_config_python=/usr/bin/python2 npm ci
 ```
 
 #### Module usage
@@ -100,10 +111,10 @@ var myCoin = {
 #### Current Zcash templates
 
 This fork always uses the daemon's `coinbasetxn.data` and `coinbasetxn.hash`.
-Configure the daemon's mining reward address before starting the pool and keep
-the pool's `address` consistent with it; no coinbase-mode option is needed.
-Pool payout options do not rewrite the daemon's funding outputs or shielded
-bundles. Pool fees must be handled outside the coinbase.
+Configure the daemon's mining reward address before starting the pool; no
+coinbase-mode option is needed. The pool's transparent `address` does not override
+that reward destination. Leave `rewardRecipients` empty and `poolHex` unset or empty.
+Pool fees and miner payments must be handled outside the coinbase.
 
 The pool preserves opaque transaction bytes and order, uses the template's
 `defaultroots.merkleroot` when supplied, and puts `blockcommitmentshash`
@@ -113,7 +124,9 @@ are converted from display order to header byte order. Same-parent coinbase
 and root changes create new jobs while retaining in-flight old jobs.
 
 Run `npm test` with Node.js 8.17 or newer for serialization and RPC-routing
-checks. These do not establish live consensus acceptance.
+checks. To check a saved Zebra GBT response, also run
+`node test/blockTemplate.js /path/to/template.json`. These checks preserve opaque
+v5/v6 bytes and compare header roots, but do not establish live consensus acceptance.
 
 If you are using an equihash coin that has founder's rewards, you need to include details about the FR system,
 ```javascript
@@ -188,16 +201,10 @@ var pool = Stratum.createPool({
 
     "coin": myCoin,
 
-    "address": "mi4iBXbBsydtcc5yFmsff2zCFVX4XG7qJc", //Address to where block rewards are given
+    "address": "mi4iBXbBsydtcc5yFmsff2zCFVX4XG7qJc", //Legacy transparent identity; configure rewards on the daemon
 
-    /* Block rewards go to the configured pool wallet address to later be paid out to miners,
-       except for a percentage that can go to, for examples, pool operator(s) as pool fees or
-       or to donations address. Addresses or hashed public keys can be used. Here is an example
-       of rewards going to the main pool op, a pool co-owner, and NOMP donation. */
-    "rewardRecipients": {
-        "n37vuNFkXfk15uFnGoVyHZ6PYQxppD3QqK": 1.5, //1.5% goes to pool op
-        "mirj3LtZxbSTharhtXvotqtJXUY7ki5qfx": 0.5, //0.5% goes to a pool co-owner
-    },
+    // Daemon coinbases cannot be rewritten to include pool-controlled fee recipients.
+    "rewardRecipients": {},
 
     "blockRefreshInterval": 1000, //How often to poll RPC daemons for new blocks, in milliseconds
 

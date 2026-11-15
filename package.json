@@ -35,10 +35,11 @@
         "async": "^2.6.1",
         "base58-native": "^0.1.4",
         "bignum": "^0.13.1",
-        "bitgo-utxo-lib": "git+https://github.com/upbqdn/bitgo-utxo-lib.git",
-        "equihashverify": "git+https://github.com/s-nomp/equihashverify.git",
+        "bitgo-utxo-lib": "git+https://github.com/upbqdn/bitgo-utxo-lib.git#269bf2d97a356757f9734f9fec2acd2fa5c20913",
+        "equihashverify": "git+https://github.com/s-nomp/equihashverify.git#2b2c5c9725f1e85a4eaa8b1c8f974aad65362c8e",
         "verushash": "git+https://github.com/VerusCoin/verushash-node#e6572f345b8c24e4a1212f6c9eb66c1c400d83e1",
         "merkle-bitcoin": "^1.0.2",
+        "node-gyp": "5.0.5",
         "promise": "^8.0.1"
     },
     "engines": {

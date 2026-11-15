@@ -180,7 +180,25 @@ async function checkFundingStreams() {
         'funding stream metadata must not rewrite the daemon coinbase');
 }
 
-check().then(checkBuilderInputs).then(checkFundingStreams).then(() => {
+async function checkRegtestSolution() {
+    const manager = new JobManager({coin: {
+        algorithm: 'equihash', parameters: {N: 48, K: 5, personalization: 'ZcashPoW'}
+    }, address: address, recipients: []});
+    await manager.processTemplate({
+        version: 4, height: 200, curtime: 1700000000,
+        previousblockhash: '01'.repeat(32), target: '0f'.repeat(32), bits: '200f0f0f',
+        transactions: [], finalsaplingroothash: '22'.repeat(32),
+        coinbasetxn: {data: '0600008098b684d85b16a537', hash: '12'.repeat(32)}
+    });
+    const submit = solution => manager.processShare(manager.currentJob.jobId,
+        1, 1, '', '', '00f15365', '00'.repeat(32), '', 0, 'worker', solution).error;
+    assert.deepStrictEqual(submit('00'.repeat(36)),
+        [20, 'Error: Incorrect size of solution (72), expected 74']);
+    assert.deepStrictEqual(submit('24' + '00'.repeat(36)), [20, 'invalid solution'],
+        'a native Regtest-sized solution must reach the actual Equihash verifier');
+}
+
+check().then(checkBuilderInputs).then(checkFundingStreams).then(checkRegtestSolution).then(() => {
     console.log('Same-parent builder updates and bounded old-job share lookup checks passed.');
 }, error => {
     console.error(error);
