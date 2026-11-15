@@ -723,12 +723,10 @@ async function checkAcceptedBlockRefresh() {
 }
 
 async function checkLegacySubsidy() {
-    const live = await start(template(200, 'before-halving'), {
-        rewardRecipients: {'n37vuNFkXfk15uFnGoVyHZ6PYQxppD3QqK': 1}, poolHex: '616263'
-    });
+    const live = await start(template(200, 'before-halving'));
     const before = live.pool.jobManager.currentJob;
     assert.strictEqual(before.genTx, before.rpcData.coinbasetxn.data,
-        'the fork uses Zebra coinbase bytes even when pool payout options are configured');
+        'subsidy metadata must not rewrite the daemon coinbase');
     assert.strictEqual(before.genTxHash, before.rpcData.coinbasetxn.hash);
     assert.strictEqual(before.rpcData.miner, 12.5);
 
@@ -760,7 +758,7 @@ async function checkLegacySubsidy() {
     assert.strictEqual(live.pool.jobManager.currentJob.rpcData.miner, 3.125,
         'a backup template must use the subsidy from that same daemon');
     assert.strictEqual(live.pending().options.instance.index, 1);
-    assert.strictEqual(live.pool.options.feePercent, 1);
+    assert.strictEqual(live.pool.options.feePercent, 0);
 }
 
 async function checkSubsidyFailure() {

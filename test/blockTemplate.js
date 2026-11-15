@@ -3,11 +3,16 @@
 // Exercise the fork's real daemon-coinbase, Merkle and serialization implementations.
 const assert = require('assert');
 const crypto = require('crypto');
+const fs = require('fs');
 require('../lib/algoProperties');
 const util = require('../lib/util');
 const merkle = require('../lib/merkleTree');
 const BlockTemplate = require('../lib/blockTemplate');
-const reverse = hex => Buffer.from(hex, 'hex').reverse().toString('hex');
+const reverse = hex => {
+    assert(typeof hex === 'string' && /^[0-9a-f]{64}$/i.test(hex),
+        'expected a 32-byte hexadecimal hash');
+    return Buffer.from(hex, 'hex').reverse().toString('hex');
+};
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest();
 const pair = (a, b) => digest(digest(Buffer.from(a + b, 'hex'))).toString('hex');
 const ids = [0, 1, 2, 3].map(n => digest(Buffer.from('txid-' + n)).toString('hex'));
@@ -48,17 +53,26 @@ function checkTemplate(rpc, expectedRoot) {
     delete rpc.rewardFees;
     assert.strictEqual(JSON.stringify(rpc), before, 'consensus template fields must not be mutated');
 }
+function checkCapture(rpc) {
+    assert(rpc.defaultroots, 'capture must include Zebra defaultroots');
+    const expected = reverse(rpc.defaultroots.merkleroot);
+    checkTemplate(rpc, expected);
+    const withoutRoots = Object.assign({}, rpc);
+    delete withoutRoots.defaultroots;
+    assert.strictEqual(merkle.getRoot(withoutRoots, rpc.coinbasetxn.hash), expected);
+}
 // Synthetic v5/v6 bytes exercise preservation, not transaction validity or proof verification.
 ['050000800a27a726b4d0d6c2', '0600008098b684d85b16a537'].forEach(prefix => {
     for (let count = 0; count < 4; count++) {
         const rpc = {version: 4, height: 200, curtime: 1700000000,
             previousblockhash: ids[3], target: '0f'.repeat(32), bits: '200f0f0f',
-            coinbasetxn: {data: prefix + '00', hash: ids[0]},
+            coinbasetxn: {data: prefix + '00', hash: ids[0], authdigest: 'ab'.repeat(32)},
             transactions: ids.slice(1, count + 1).map((hash, i) => ({
-                hash: hash, data: prefix + '000' + i, fee: 10000})),
+                hash: hash, authdigest: 'cd'.repeat(32), data: prefix + '000' + i, fee: 10000})),
             finalsaplingroothash: ids[2]};
         checkTemplate(rpc, roots[count]);
-        rpc.defaultroots = {merkleroot: reverse(roots[count]), blockcommitmentshash: ids[3]};
+        rpc.defaultroots = {merkleroot: reverse(roots[count]), chainhistoryroot: ids[1],
+            authdataroot: ids[2], blockcommitmentshash: ids[3]};
         checkTemplate(rpc, roots[count]);
         rpc.blockcommitmentshash = ids[1];
         checkTemplate(rpc, roots[count]);
@@ -71,4 +85,26 @@ assert.strictEqual(merkle.getRoot({transactions: [{txid: ids[1], hash: ids[3]}]}
     transactions: Array.from({length: count}, () => ({hash: ids[1], data: '00', fee: 0})),
     defaultroots: {merkleroot: ids[2], blockcommitmentshash: ids[3]}}, reverse(ids[2])));
 assert.throws(() => job({target: '0f'.repeat(32), transactions: []}), /require coinbasetxn/);
+const capturedTemplate = {version: 4, height: 200, curtime: 1700000000,
+    previousblockhash: ids[3], target: '0f'.repeat(32), bits: '200f0f0f',
+    coinbasetxn: {data: '0600008098b684d85b16a537', hash: ids[0]}, transactions: [],
+    defaultroots: {merkleroot: ids[0], blockcommitmentshash: ids[3]}};
+const malformedCapture = Object.assign({}, capturedTemplate, {
+    defaultroots: Object.assign({}, capturedTemplate.defaultroots, {merkleroot: ids[0] + 'zz'})});
+assert.throws(() => checkCapture(malformedCapture), assert.AssertionError);
+
+// Saved Zebra templates exercise the real serialized bundles as well as their header roots.
+if (process.argv[2]) {
+    const captured = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+    checkCapture(captured.result || captured);
+}
+
+const Pool = require('../lib/pool');
+[{rewardRecipients: {address: 1}}, {poolHex: 'abcd'}].forEach(options => {
+    assert.throws(() => new Pool(options), /Daemon coinbase mode/);
+});
+assert.doesNotThrow(() => new Pool({
+    coin: {algorithm: 'equihash'}, rewardRecipients: {}, poolHex: '',
+    paymentProcessing: {enabled: true, wallet: 'zallet'}
+}));
 console.log('Zebra coinbase serialization and header root checks passed (not consensus acceptance).');
